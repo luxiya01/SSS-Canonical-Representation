@@ -8,10 +8,36 @@ from scipy.signal import convolve2d as conv2
 from scipy.stats import norm
 from scipy.optimize import nnls
 from skimage.restoration import richardson_lucy
+import math
 import time
 import pdb
+from patch_gen_scripts import outlier_removal
 
-def canonical_trans(xtf_file, mesh_file, svp_file, *keyPoint, deconv=False, len_bins = 1301, LambertianModel = "sin_square"):
+def save_intermediate_fig(pings_port, pings_stbd, xtf_filepath, lambertian_model, stage_idx, stage, a_max=2.1):
+    """Save intermediate results to file and increment stage_idx"""
+    pings = np.concatenate((np.fliplr(pings_stbd), pings_port), axis=1)
+    pings = outlier_removal(pings, a_max=a_max)
+    plt.imshow(pings, cmap='gray')
+    plt.axis('off')
+    plt.savefig(f'{xtf_filepath}-{lambertian_model}-{stage_idx}-{stage}.png',
+                dpi=300,
+                bbox_inches='tight',
+                pad_inches=0)
+    plt.close('all')
+    return stage_idx + 1
+
+
+def calculate_beam_pattern(theta, theta0=math.radians(50/2), k=3.29, theta_t=math.radians(40), bp_exp=2):
+    """
+    k=3.29 for (one way) 3 dB - beam width=50 degrees
+    """
+    k_sin_theta = k * np.sin(theta-theta_t/2 - theta0)
+    beam_pattern = (np.sin(k_sin_theta)/k_sin_theta)**bp_exp
+    beam_pattern[np.isnan(beam_pattern)]=1
+    return beam_pattern
+
+def canonical_trans(xtf_file, mesh_file, svp_file, *keyPoint, deconv=False, len_bins = 1301, LambertianModel = "sin_square",
+                    beam_pattern_correction=False):
     """
     Canonical transformation for sss images and kps.
 
@@ -61,6 +87,10 @@ def canonical_trans(xtf_file, mesh_file, svp_file, *keyPoint, deconv=False, len_
     port = port.reshape(rows, 1301, -1).mean(2)
     raw_pings = np.concatenate((np.fliplr(starboard),port), axis=1)
 
+    # Save intermediate plots
+    stage_idx = 0
+    stage_idx = save_intermediate_fig(port, starboard, xtf_file, LambertianModel, stage_idx, stage='raw')
+
     r = np.linspace(time_duration / len_bins, time_duration, num=len_bins) * xtf_pings[0].sound_vel_  # a list of ranges = n * time interval * sound velocity, shape (20816,1)
 
     ########################  Image Deconvolution  ###############################
@@ -85,6 +115,9 @@ def canonical_trans(xtf_file, mesh_file, svp_file, *keyPoint, deconv=False, len_
         deconvolved_port_pings  = np.transpose(deconvolved_port_pings)
         deconvolved_port_pings = np.ceil(deconvolved_port_pings).astype(int)
         # pings = np.concatenate((np.fliplr(deconvolved_starboard_pings),deconvolved_port_pings), axis=1)   # (1870, 41632)
+
+        # Save intermediate plots
+        stage_idx = save_intermediate_fig(deconvolved_port_pings, deconvolved_starboard_pings, xtf_file, LambertianModel, stage_idx, stage="deconv")
     else:
         deconvolved_starboard_pings = starboard
         deconvolved_port_pings = port
@@ -100,6 +133,16 @@ def canonical_trans(xtf_file, mesh_file, svp_file, *keyPoint, deconv=False, len_
     # read height of current AUV position from the draper
     heights = np.array([draper.project_altimeter(ping.pos_) for ping in xtf_pings])  # (1870,1)
     incid_angle = np.array([np.arcsin(height / r) for height in heights])  # (1870, 20816), pixels where intensities are zero are NAN
+
+    if beam_pattern_correction:
+        theta0 = 60/2
+        theta_t = 0
+        beams_patterns = calculate_beam_pattern(incid_angle, theta0=math.radians(theta0), theta_t=math.radians(theta_t))
+        deconvolved_port_pings = deconvolved_port_pings/beams_patterns
+        deconvolved_starboard_pings = deconvolved_starboard_pings/beams_patterns
+
+        # Save intermediate plots
+        stage_idx = save_intermediate_fig(deconvolved_port_pings, deconvolved_starboard_pings, xtf_file, LambertianModel, stage_idx, stage="beam-pattern-correction")
 
     # Lambertian Model
     lambert_tan = np.tan(incid_angle) # (1870, 20816)
@@ -124,6 +167,9 @@ def canonical_trans(xtf_file, mesh_file, svp_file, *keyPoint, deconv=False, len_
     inten_deconv_port_pings = np.nan_to_num(deconv_inten_port_pings)
     inten_deconv_starboard_pings = np.nan_to_num(deconv_inten_starboard_pings)
 
+    # Save intermediate plots
+    stage_idx = save_intermediate_fig(inten_deconv_port_pings, inten_deconv_starboard_pings, xtf_file, LambertianModel, stage_idx, stage="intensity-correction")
+    
     ########################  Slant Correction  ###############################
 
     # convert range distance to ground distnce
@@ -178,6 +224,8 @@ def canonical_trans(xtf_file, mesh_file, svp_file, *keyPoint, deconv=False, len_
         # print(f"One ping corrected in {toc - tic:0.4f} seconds")
 
     pings = np.concatenate((np.fliplr(corrected_stbd),corrected_port), axis=1)
+    # Save intermediate plots
+    stage_idx = save_intermediate_fig(corrected_port, corrected_stbd, xtf_file, LambertianModel, stage_idx, stage="slant-range-correction")
     
     if len(keyPoint):
         kps = keyPoint[0]

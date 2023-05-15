@@ -5,8 +5,9 @@ import json
 from operator import index
 import os
 import sys
-sys.path.append('/home/viki/Master_Thesis/auvlib/scripts')
-sys.path.append('/home/viki/Master_Thesis/SSS-Canonical-Representation')
+sys.path.append('/home/li/Documents/auvlib/scripts/')
+#sys.path.append('/home/viki/Master_Thesis/auvlib/scripts')
+#sys.path.append('/home/viki/Master_Thesis/SSS-Canonical-Representation')
 
 import pickle
 import shutil
@@ -49,7 +50,9 @@ def patch_pair_gen(kps1: np.array,
                    img1: np.array,
                    img2: np.array,
                    patch_id: int,
-                   patch_outpath: str):
+                   patch_outpath: str,
+                   port: bool,
+                   nadir: int):
     """ Generate a Patch class with two patches and kps"""
     center_kps1 = [(kps1[:,1].max() + kps1[:,1].min())/2, (kps1[:,0].max() + kps1[:,0].min())/2]
     center_kps2 = [(kps2[:,1].max() + kps2[:,1].min())/2, (kps2[:,0].max() + kps2[:,0].min())/2]
@@ -59,6 +62,7 @@ def patch_pair_gen(kps1: np.array,
         start_ping_2 = int(center_kps2[1] - (patch_size - 1) / 2)
         max_bin_width1 = kps1[:,1].max() - kps1[:,1].min() + 1
         max_bin_width2 = kps2[:,1].max() - kps2[:,1].min() + 1
+        #TODO: Use fix number of bins for the patches! (port = [:nadir], stbd = [nadir:])
         bin_width = np.ceil(max(max_bin_width1, max_bin_width2) / 2).astype(int) + 10
         start_bin_1 = int(center_kps1[0] - bin_width)
         start_bin_2 = int(center_kps2[0] - bin_width)
@@ -214,7 +218,9 @@ def generate_patches_pair(path1: str,
                                         img1,
                                         img2,
                                         patch_id,
-                                        patch_outpath)
+                                        patch_outpath,
+                                        port=True,
+                                        nadir=nadir)
             patch_id += 1
         if patch_stdb1_ind.any() and ((matched_kps2[patch_stdb1_ind,1]<nadir).any() != (matched_kps2[patch_stdb1_ind,1]>=nadir).any()):
             patch_stbd = patch_pair_gen(matched_kps1[patch_stdb1_ind],
@@ -226,7 +232,9 @@ def generate_patches_pair(path1: str,
                                         img1,
                                         img2,
                                         patch_id,
-                                        patch_outpath)
+                                        patch_outpath,
+                                        port=False,
+                                        nadir=nadir)
             patch_id += 1
 
 
